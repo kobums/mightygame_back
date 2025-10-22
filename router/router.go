@@ -72,6 +72,23 @@ func SetRouter(r *gin.Engine) {
 			c.JSON(controller.Code, controller.Result)
 		})
 
+		// Game state endpoints
+		apiGroup.GET("/game/state/:roomId", func(c *gin.Context) {
+			var controller api.RoomController
+			controller.Init(c)
+			controller.GetGameState()
+			controller.Close()
+			c.JSON(controller.Code, controller.Result)
+		})
+
+		apiGroup.POST("/game/bid", func(c *gin.Context) {
+			var controller api.RoomController
+			controller.Init(c)
+			controller.PlaceBid()
+			controller.Close()
+			c.JSON(controller.Code, controller.Result)
+		})
+
 	}
 
 	{

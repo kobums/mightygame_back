@@ -1,6 +1,7 @@
 package api
 
 import (
+	"math/rand"
 	"mighty/controllers"
 	"strconv"
 	"sync"
@@ -9,6 +10,12 @@ import (
 
 type RoomController struct {
 	controllers.Controller
+}
+
+// Card represents a playing card
+type Card struct {
+	Suit   string `json:"suit"`   // "spade", "diamond", "heart", "club", "joker"
+	Number string `json:"number"` // "A", "2"..."10", "J", "Q", "K", "JOKER"
 }
 
 // Player represents a player in a room
@@ -30,11 +37,35 @@ type Room struct {
 	CreatedAt      time.Time `json:"createdAt"`
 }
 
+// GameState represents the current game state
+type GameState struct {
+	RoomID         int64              `json:"roomId"`
+	Players        []Player           `json:"players"`
+	PlayerHands    map[int64][]Card   `json:"-"` // Hidden from client
+	Kitty          []Card             `json:"-"` // Hidden from client
+	CurrentTurn    int                `json:"currentTurn"`    // Index of player whose turn it is
+	Phase          string             `json:"phase"`          // "bidding", "kitty_exchange", "playing"
+	Bids           []Bid              `json:"bids"`
+	CurrentBidder  int64              `json:"currentBidder"`  // PlayerID of current bidder
+	HighestBid     *Bid               `json:"highestBid"`
+	TrumpSuit      string             `json:"trumpSuit"`
+}
+
+// Bid represents a bidding action
+type Bid struct {
+	PlayerID   int64  `json:"playerId"`
+	PlayerName string `json:"playerName"`
+	BidType    string `json:"bidType"` // "pass", "13", "14", "15", "16", "17", "18", "19", "20"
+	TrumpSuit  string `json:"trumpSuit,omitempty"` // For actual bids (not pass)
+}
+
 // In-memory storage
 var (
-	rooms      = make(map[int64]*Room)
-	roomsMutex sync.RWMutex
-	nextRoomID int64 = 1
+	rooms        = make(map[int64]*Room)
+	games        = make(map[int64]*GameState)
+	roomsMutex   sync.RWMutex
+	gamesMutex   sync.RWMutex
+	nextRoomID   int64 = 1
 	nextPlayerID int64 = 1
 )
 
@@ -223,6 +254,68 @@ func (c *RoomController) GetRoomDetail() {
 	c.Result["room"] = room
 }
 
+// createDeck creates a standard 53-card deck (52 cards + 1 joker)
+func createDeck() []Card {
+	suits := []string{"spade", "diamond", "heart", "club"}
+	numbers := []string{"A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"}
+
+	deck := make([]Card, 0, 53)
+
+	// Add all regular cards
+	for _, suit := range suits {
+		for _, number := range numbers {
+			deck = append(deck, Card{Suit: suit, Number: number})
+		}
+	}
+
+	// Add joker
+	deck = append(deck, Card{Suit: "joker", Number: "JOKER"})
+
+	return deck
+}
+
+// shuffleDeck shuffles the deck using Fisher-Yates algorithm
+func shuffleDeck(deck []Card) {
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	for i := len(deck) - 1; i > 0; i-- {
+		j := r.Intn(i + 1)
+		deck[i], deck[j] = deck[j], deck[i]
+	}
+}
+
+// initializeGame creates initial game state with shuffled and dealt cards
+func initializeGame(room *Room) *GameState {
+	// Create and shuffle deck
+	deck := createDeck()
+	shuffleDeck(deck)
+
+	// Deal 10 cards to each player
+	playerHands := make(map[int64][]Card)
+	cardIndex := 0
+	for _, player := range room.Players {
+		playerHands[player.ID] = deck[cardIndex : cardIndex+10]
+		cardIndex += 10
+	}
+
+	// Remaining 3 cards go to kitty
+	kitty := deck[50:53]
+
+	game := &GameState{
+		RoomID:        room.ID,
+		Players:       room.Players,
+		PlayerHands:   playerHands,
+		Kitty:         kitty,
+		CurrentTurn:   0,
+		Phase:         "bidding",
+		Bids:          []Bid{},
+		CurrentBidder: room.Players[0].ID,
+		HighestBid:    nil,
+		TrumpSuit:     "",
+	}
+
+	return game
+}
+
 // StartGame starts the game
 func (c *RoomController) StartGame() {
 	var reqBody struct {
@@ -235,24 +328,149 @@ func (c *RoomController) StartGame() {
 	_ = reqBody.PlayerID // TODO: Use this to verify player is host
 
 	roomsMutex.Lock()
-	defer roomsMutex.Unlock()
-
 	room, exists := rooms[roomID]
 	if !exists {
+		roomsMutex.Unlock()
 		c.Result["code"] = "error"
 		c.Result["message"] = "방을 찾을 수 없습니다"
 		return
 	}
 
 	if room.CurrentPlayers != 5 {
+		roomsMutex.Unlock()
 		c.Result["code"] = "error"
 		c.Result["message"] = "5명의 플레이어가 필요합니다"
 		return
 	}
 
 	room.Status = "playing"
+	roomsMutex.Unlock()
+
+	// Initialize game state
+	gamesMutex.Lock()
+	games[roomID] = initializeGame(room)
+	gamesMutex.Unlock()
 
 	c.Result["code"] = "success"
 	c.Result["message"] = "게임이 시작되었습니다"
 	c.Result["room"] = room
+}
+
+// GetGameState returns current game state for a player
+func (c *RoomController) GetGameState() {
+	roomID, _ := strconv.ParseInt(c.Context.Param("roomId"), 10, 64)
+	playerID, _ := strconv.ParseInt(c.Context.Query("playerId"), 10, 64)
+
+	gamesMutex.RLock()
+	game, exists := games[roomID]
+	gamesMutex.RUnlock()
+
+	if !exists {
+		c.Result["code"] = "error"
+		c.Result["message"] = "게임을 찾을 수 없습니다"
+		return
+	}
+
+	// Return game state with player's cards
+	c.Result["code"] = "success"
+	c.Result["game"] = map[string]interface{}{
+		"roomId":        game.RoomID,
+		"players":       game.Players,
+		"myHand":        game.PlayerHands[playerID],
+		"currentTurn":   game.CurrentTurn,
+		"phase":         game.Phase,
+		"bids":          game.Bids,
+		"currentBidder": game.CurrentBidder,
+		"highestBid":    game.HighestBid,
+		"trumpSuit":     game.TrumpSuit,
+	}
+}
+
+// PlaceBid handles player bidding
+func (c *RoomController) PlaceBid() {
+	var reqBody struct {
+		RoomID    int64  `json:"roomId"`
+		PlayerID  int64  `json:"playerId"`
+		BidType   string `json:"bidType"`   // "pass", "13", "14", etc.
+		TrumpSuit string `json:"trumpSuit"` // For actual bids (not pass)
+	}
+	c.Context.ShouldBindJSON(&reqBody)
+
+	gamesMutex.Lock()
+	defer gamesMutex.Unlock()
+
+	game, exists := games[reqBody.RoomID]
+	if !exists {
+		c.Result["code"] = "error"
+		c.Result["message"] = "게임을 찾을 수 없습니다"
+		return
+	}
+
+	// Validate it's the player's turn
+	if game.CurrentBidder != reqBody.PlayerID {
+		c.Result["code"] = "error"
+		c.Result["message"] = "당신의 차례가 아닙니다"
+		return
+	}
+
+	// Validate bid is higher than current highest
+	if reqBody.BidType != "pass" {
+		bidValue, _ := strconv.Atoi(reqBody.BidType)
+		if game.HighestBid != nil {
+			highestValue, _ := strconv.Atoi(game.HighestBid.BidType)
+			if bidValue <= highestValue {
+				c.Result["code"] = "error"
+				c.Result["message"] = "더 높은 공약을 선택해야 합니다"
+				return
+			}
+		}
+	}
+
+	// Find player name
+	var playerName string
+	for _, player := range game.Players {
+		if player.ID == reqBody.PlayerID {
+			playerName = player.Name
+			break
+		}
+	}
+
+	// Record bid
+	bid := Bid{
+		PlayerID:   reqBody.PlayerID,
+		PlayerName: playerName,
+		BidType:    reqBody.BidType,
+		TrumpSuit:  reqBody.TrumpSuit,
+	}
+	game.Bids = append(game.Bids, bid)
+
+	// Update highest bid if not a pass
+	if reqBody.BidType != "pass" {
+		game.HighestBid = &bid
+		game.TrumpSuit = reqBody.TrumpSuit
+	}
+
+	// Move to next player
+	game.CurrentTurn = (game.CurrentTurn + 1) % len(game.Players)
+	game.CurrentBidder = game.Players[game.CurrentTurn].ID
+
+	// Check if bidding is complete (4 passes after a bid, or all pass)
+	passCount := 0
+	for i := len(game.Bids) - 1; i >= 0 && i >= len(game.Bids)-4; i-- {
+		if game.Bids[i].BidType == "pass" {
+			passCount++
+		}
+	}
+
+	if game.HighestBid != nil && passCount >= 4 {
+		// Bidding complete - winner exchanges kitty
+		game.Phase = "kitty_exchange"
+	} else if len(game.Bids) >= 5 && game.HighestBid == nil {
+		// All passed - redeal (for now just stay in bidding)
+		game.Phase = "bidding"
+	}
+
+	c.Result["code"] = "success"
+	c.Result["message"] = "비딩이 완료되었습니다"
+	c.Result["game"] = game
 }
