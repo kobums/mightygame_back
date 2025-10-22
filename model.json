@@ -1,0 +1,18 @@
+{
+  "database": "mighty",
+  "user": "mighty",
+  "server": "141.164.37.127",
+  "password": "mightydb",
+  "table": [
+    {
+      "name": "gameuser",
+      "method": ["FindByGame", "CountByGame"],
+      "join": [
+        {
+          "name": "user",
+          "column": "user"
+        }
+      ]
+    }
+  ]
+}

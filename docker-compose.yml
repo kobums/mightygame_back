@@ -1,0 +1,10 @@
+version: "3"
+
+services:
+  backend:
+    restart: always
+    image: yiyuhki/mighty
+    ports:
+      - "9004:9004"
+    volumes:
+      - /home/mighty/webdata:/usr/local/main/webdata
