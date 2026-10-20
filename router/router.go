@@ -13,15 +13,9 @@ func SetRouter(r *gin.Engine) {
 	apiGroup := r.Group("/api")
 	{
 
-		apiGroup.GET("/login/login", func(c *gin.Context) {
-			loginid_ := c.Query("loginid")
-			passwd_ := c.Query("passwd")
-			var controller api.Login
-			controller.Init(c)
-			controller.Login(loginid_, passwd_)
-			controller.Close()
-			c.JSON(controller.Code, controller.Result)
-		})
+		// 로그인/로그아웃은 router/auth.go 의 SetAuthRouter (POST /api/login/login) 로 옮겼다.
+		// GET /api/login/login?loginid=&passwd= 는 비밀번호가 URL·로그에 남으므로 제공하지 않는다
+		// (기존 Login 은 빈 함수였고 이를 호출하는 클라이언트도 없음).
 
 		// Room endpoints
 		apiGroup.POST("/room/create", func(c *gin.Context) {
@@ -127,7 +121,8 @@ func SetRouter(r *gin.Engine) {
 			jsonData, _ := c.GetRawData()
 			json.Unmarshal(jsonData, &results)
 			var item_ models.Game
-			c.ShouldBindJSON(&item_)
+			// GetRawData 로 본문을 이미 읽었으므로 ShouldBindJSON 대신 같은 데이터로 디코드한다.
+			json.Unmarshal(jsonData, &item_)
 			var controller rest.GameController
 			controller.Init(c)
 			controller.Update(item_)
@@ -179,7 +174,8 @@ func SetRouter(r *gin.Engine) {
 			jsonData, _ := c.GetRawData()
 			json.Unmarshal(jsonData, &results)
 			var item_ models.Gameuser
-			c.ShouldBindJSON(&item_)
+			// GetRawData 로 본문을 이미 읽었으므로 ShouldBindJSON 대신 같은 데이터로 디코드한다.
+			json.Unmarshal(jsonData, &item_)
 			var controller rest.GameuserController
 			controller.Init(c)
 			controller.Update(item_)
@@ -231,7 +227,8 @@ func SetRouter(r *gin.Engine) {
 			jsonData, _ := c.GetRawData()
 			json.Unmarshal(jsonData, &results)
 			var item_ models.User
-			c.ShouldBindJSON(&item_)
+			// GetRawData 로 본문을 이미 읽었으므로 ShouldBindJSON 대신 같은 데이터로 디코드한다.
+			json.Unmarshal(jsonData, &item_)
 			var controller rest.UserController
 			controller.Init(c)
 			controller.Update(item_)
