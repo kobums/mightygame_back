@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/rand"
 	"mighty/config"
+	"mighty/controllers/api"
 	"mighty/global"
 	"mighty/models"
 	"mighty/router"
@@ -64,6 +65,8 @@ func Http() {
 		}
 	}
 	c.AllowCredentials = true
+	// 게임 진행 API 의 플레이어 토큰 헤더(교차 origin 프리플라이트 허용).
+	c.AddAllowHeaders(api.PlayerTokenHeader)
 
 	r.Use(cors.New(c))
 
