@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"mighty/config"
 	"mighty/global"
 	"mighty/models"
@@ -50,7 +51,17 @@ func Http() {
 
 	r.Use(cors.New(c))
 
-	store := cookie.NewStore([]byte("secret"))
+	// 하드코딩된 쿠키 서명 키("secret")를 쓰면 누구나 세션을 위조할 수 있다.
+	// SESSION_SECRET 이 없으면 기동마다 랜덤 키를 생성한다(재시작 시 세션 만료).
+	sessionKey := []byte(config.SessionSecret)
+	if len(sessionKey) == 0 {
+		sessionKey = make([]byte, 32)
+		if _, err := rand.Read(sessionKey); err != nil {
+			log.Fatal(err)
+		}
+		log.Warn("SESSION_SECRET not set: using a random session key")
+	}
+	store := cookie.NewStore(sessionKey)
 	r.Use(sessions.Sessions("mysession", store))
 
 	r.Static("/assets", "./assets")

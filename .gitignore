@@ -1,3 +1,4 @@
 bin
 webdata
 main
+/config/config.json

@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"regexp"
 	"mighty/controllers"
 	"mighty/models"
 )
@@ -14,6 +15,10 @@ func (c *UserController) Read(id int64) {
 
 	manager := models.NewUserManager(conn)
 	item := manager.Get(id)
+	// 응답에 비밀번호를 노출하지 않는다.
+	if item != nil {
+		item.Passwd = ""
+	}
 	c.Set("item", item)
 }
 
@@ -27,10 +32,6 @@ func (c *UserController) Index(page int, pagesize int) {
     _loginid := c.Get("loginid")
     if _loginid != "" {
         args = append(args, models.Where{Column:"loginid", Value:_loginid, Compare:"like"})
-    }
-    _passwd := c.Get("passwd")
-    if _passwd != "" {
-        args = append(args, models.Where{Column:"passwd", Value:_passwd, Compare:"like"})
     }
     _name := c.Get("name")
     if _name != "" {
@@ -62,11 +63,18 @@ func (c *UserController) Index(page int, pagesize int) {
         }
     }
 
-    if orderby != "" {
+    // orderby 는 ORDER BY 절에 그대로 들어가므로 "컬럼 [asc|desc]" 목록 형태만 허용한다 (SQL injection 방지).
+    if orderby != "" && regexp.MustCompile(`^\s*[A-Za-z0-9_]+(\s+(?i:asc|desc))?\s*(,\s*[A-Za-z0-9_]+(\s+(?i:asc|desc))?\s*)*$`).MatchString(orderby) {
         args = append(args, models.Ordering(orderby))
     }
     
 	items := manager.Find(args)
+	// 응답에 비밀번호를 노출하지 않는다.
+	if items != nil {
+		for i := range *items {
+			(*items)[i].Passwd = ""
+		}
+	}
 	c.Set("items", items)
 
     total := manager.Count(args)

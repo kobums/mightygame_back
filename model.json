@@ -2,7 +2,7 @@
   "database": "mighty",
   "user": "mighty",
   "server": "141.164.37.127",
-  "password": "mightydb",
+  "password": "",
   "table": [
     {
       "name": "gameuser",

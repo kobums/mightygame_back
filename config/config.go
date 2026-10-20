@@ -29,6 +29,9 @@ var (
 	DEBUG   uint64
 
 	Domain string
+
+	// 세션 쿠키 서명 키. 미설정 시 기동마다 랜덤 생성(main.go).
+	SessionSecret string
 )
 
 func init() {
@@ -50,9 +53,11 @@ func init() {
 	viper.AddConfigPath("./config")
 	viper.AddConfigPath("../config")
 	viper.AddConfigPath(".")
+	// config.json 은 DB 접속 정보를 담으므로 커밋하지 않는다(config.json.example 참고).
+	// 파일이 없으면 환경변수(DATABASE_URL)만으로도 기동할 수 있다.
 	err := viper.ReadInConfig()
 	if err != nil {
-		panic(fmt.Errorf("Fatal error config file: %s \n", err))
+		fmt.Printf("config file not loaded: %s \n", err)
 	}
 
 	if value := viper.Get("connectionString"); value != nil {
@@ -69,5 +74,13 @@ func init() {
 
 	if value := viper.Get("domain"); value != nil {
 		Domain = value.(string)
+	}
+
+	// 환경변수가 있으면 설정 파일 값보다 우선한다.
+	if value := os.Getenv("DATABASE_URL"); value != "" {
+		ConnectionString = value
+	}
+	if value := os.Getenv("SESSION_SECRET"); value != "" {
+		SessionSecret = value
 	}
 }

@@ -1,4 +1,0 @@
-{
-  "database": "mysql",
-  "connectionString": "mighty:mightydb@tcp(141.164.37.127:3306)/mighty"
-}
