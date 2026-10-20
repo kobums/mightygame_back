@@ -1,3 +1,13 @@
+// 주의: 이 파일은 buildtool-router 로 생성된 뒤 수동으로 보안 수정이 들어간 파일이다.
+// buildtool-router 의 소스/템플릿은 어느 저장소에도 없으므로(gomachine 의 views/go/router.jet 은
+// fiber 용 router/routers/* 구조라 이 gin 파일과 다르다) 재생성하면 아래 수정이 모두 사라진다.
+// 재생성했다면 다음을 다시 적용할 것:
+//   - PUT 핸들러: GetRawData 로 읽은 본문을 json.Unmarshal 로 다시 디코드 (ShouldBindJSON 은 이미 소비된 본문을 못 읽음)
+//   - GET /api/login/login?loginid=&passwd= 라우트를 만들지 말 것 (로그인은 router/auth.go 의 POST)
+// 로그인 필수 미들웨어(router/auth.go LoginRequiredForWrites)·본인 확인(controllers/rest/user.go)·
+// bcrypt 해시(controllers/api/login.go)·게임 플레이어 토큰(controllers/api/playertoken.go)은
+// 이 파일 밖에 있어 재생성의 영향을 받지 않는다. 단 controllers/rest/*.go 도 재생성 대상이면 함께 확인할 것.
+
 package router
 
 import (

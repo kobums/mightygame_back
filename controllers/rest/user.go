@@ -1,3 +1,8 @@
+// 주의: buildtool-model(gomachine views/go/rest.jet)로 생성된 뒤 수동 보안 수정이 들어간 파일이다.
+// 재생성하면 Insert/Update 의 bcrypt 해시(api.HashPasswd)와 Update/Delete 의 본인 확인
+// (item.Id != c.Session.Id 거부)이 사라질 수 있다. gomachine 템플릿은 auth=="jwt" 일 때만
+// 같은 검사를 생성하고 해시 함수도 global/jwt 를 쓰므로, 재생성 후 반드시 diff 로 확인할 것.
+
 package rest
 
 import (
