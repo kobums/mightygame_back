@@ -3,6 +3,7 @@ package api
 import (
 	"math/rand"
 	"mighty/controllers"
+	"net/http"
 	"strconv"
 	"sync"
 	"time"
@@ -109,11 +110,21 @@ func (c *RoomController) CreateRoom() {
 		CreatedAt:      time.Now(),
 	}
 
+	token, err := issuePlayerToken(roomID, playerID)
+	if err != nil {
+		c.Code = http.StatusInternalServerError
+		c.Result["code"] = "error"
+		c.Result["message"] = "방 생성에 실패했습니다"
+		return
+	}
+
 	rooms[roomID] = room
 
 	c.Result["code"] = "success"
 	c.Result["roomId"] = roomID
 	c.Result["playerId"] = playerID
+	// 이후 게임 진행 API 에 X-Player-Token 헤더로 보내야 하는 플레이어 토큰.
+	c.Result["playerToken"] = token
 	c.Result["room"] = room
 }
 
@@ -175,24 +186,40 @@ func (c *RoomController) JoinRoom() {
 	playerID := nextPlayerID
 	nextPlayerID++
 
+	token, err := issuePlayerToken(roomID, playerID)
+	if err != nil {
+		c.Code = http.StatusInternalServerError
+		c.Result["code"] = "error"
+		c.Result["message"] = "방 참가에 실패했습니다"
+		return
+	}
+
 	room.Players = append(room.Players, Player{ID: playerID, Name: playerName})
 	room.CurrentPlayers++
 
 	c.Result["code"] = "success"
 	c.Result["playerId"] = playerID
+	// 이후 게임 진행 API 에 X-Player-Token 헤더로 보내야 하는 플레이어 토큰.
+	c.Result["playerToken"] = token
 	c.Result["room"] = room
 }
 
 // LeaveRoom removes a player from a room
 func (c *RoomController) LeaveRoom() {
+	// playerId 는 클라이언트 값을 믿지 않고 토큰에서 도출한다.
+	// navigator.sendBeacon 은 헤더를 실을 수 없으므로 본문의 playerToken 도 허용한다.
 	var reqBody struct {
-		RoomID   int64 `json:"roomId"`
-		PlayerID int64 `json:"playerId"`
+		RoomID      int64  `json:"roomId"`
+		PlayerToken string `json:"playerToken"`
 	}
 	c.Context.ShouldBindJSON(&reqBody)
 
 	roomID := reqBody.RoomID
-	playerID := reqBody.PlayerID
+	token := c.playerToken(reqBody.PlayerToken)
+	playerID, ok := c.authPlayer(roomID, token)
+	if !ok {
+		return
+	}
 
 	roomsMutex.Lock()
 	defer roomsMutex.Unlock()
@@ -201,6 +228,14 @@ func (c *RoomController) LeaveRoom() {
 	if !exists {
 		c.Result["code"] = "error"
 		c.Result["message"] = "방을 찾을 수 없습니다"
+		return
+	}
+
+	// 게임이 진행 중이면 방/게임 상태를 건드리지 않는다 (대기실 → 게임 화면 전환 시의 자동 나가기 포함).
+	// 진행 중 게임의 토큰도 유지해야 게임 화면에서 계속 플레이할 수 있다.
+	if room.Status != "waiting" {
+		c.Result["code"] = "success"
+		c.Result["message"] = "게임이 진행 중이라 방을 나갈 수 없습니다"
 		return
 	}
 
@@ -226,11 +261,14 @@ func (c *RoomController) LeaveRoom() {
 	// If room is empty or host left, delete room
 	if room.CurrentPlayers == 0 || playerID == room.HostID {
 		delete(rooms, roomID)
+		revokeRoomTokens(roomID)
 		c.Result["code"] = "success"
 		c.Result["message"] = "방을 나갔습니다"
 		c.Result["roomDeleted"] = true
 		return
 	}
+
+	revokePlayerToken(token)
 
 	c.Result["code"] = "success"
 	c.Result["message"] = "방을 나갔습니다"
@@ -319,13 +357,15 @@ func initializeGame(room *Room) *GameState {
 // StartGame starts the game
 func (c *RoomController) StartGame() {
 	var reqBody struct {
-		RoomID   int64 `json:"roomId"`
-		PlayerID int64 `json:"playerId"`
+		RoomID int64 `json:"roomId"`
 	}
 	c.Context.ShouldBindJSON(&reqBody)
 
 	roomID := reqBody.RoomID
-	_ = reqBody.PlayerID // TODO: Use this to verify player is host
+	playerID, ok := c.authPlayer(roomID, c.playerToken(""))
+	if !ok {
+		return
+	}
 
 	roomsMutex.Lock()
 	room, exists := rooms[roomID]
@@ -333,6 +373,21 @@ func (c *RoomController) StartGame() {
 		roomsMutex.Unlock()
 		c.Result["code"] = "error"
 		c.Result["message"] = "방을 찾을 수 없습니다"
+		return
+	}
+
+	if room.HostID != playerID {
+		roomsMutex.Unlock()
+		c.Code = http.StatusForbidden
+		c.Result["code"] = "error"
+		c.Result["message"] = "방장만 게임을 시작할 수 있습니다"
+		return
+	}
+
+	if room.Status != "waiting" {
+		roomsMutex.Unlock()
+		c.Result["code"] = "error"
+		c.Result["message"] = "게임이 이미 시작되었습니다"
 		return
 	}
 
@@ -359,7 +414,11 @@ func (c *RoomController) StartGame() {
 // GetGameState returns current game state for a player
 func (c *RoomController) GetGameState() {
 	roomID, _ := strconv.ParseInt(c.Context.Param("roomId"), 10, 64)
-	playerID, _ := strconv.ParseInt(c.Context.Query("playerId"), 10, 64)
+	// ?playerId= 는 무시한다. 남의 패를 볼 수 없도록 playerId 는 토큰에서 도출한다.
+	playerID, ok := c.authPlayer(roomID, c.playerToken(""))
+	if !ok {
+		return
+	}
 
 	gamesMutex.RLock()
 	game, exists := games[roomID]
@@ -390,11 +449,16 @@ func (c *RoomController) GetGameState() {
 func (c *RoomController) PlaceBid() {
 	var reqBody struct {
 		RoomID    int64  `json:"roomId"`
-		PlayerID  int64  `json:"playerId"`
 		BidType   string `json:"bidType"`   // "pass", "13", "14", etc.
 		TrumpSuit string `json:"trumpSuit"` // For actual bids (not pass)
 	}
 	c.Context.ShouldBindJSON(&reqBody)
+
+	// 본문의 playerId 는 무시하고 토큰에서 도출한다.
+	playerID, ok := c.authPlayer(reqBody.RoomID, c.playerToken(""))
+	if !ok {
+		return
+	}
 
 	gamesMutex.Lock()
 	defer gamesMutex.Unlock()
@@ -407,7 +471,7 @@ func (c *RoomController) PlaceBid() {
 	}
 
 	// Validate it's the player's turn
-	if game.CurrentBidder != reqBody.PlayerID {
+	if game.CurrentBidder != playerID {
 		c.Result["code"] = "error"
 		c.Result["message"] = "당신의 차례가 아닙니다"
 		return
@@ -429,7 +493,7 @@ func (c *RoomController) PlaceBid() {
 	// Find player name
 	var playerName string
 	for _, player := range game.Players {
-		if player.ID == reqBody.PlayerID {
+		if player.ID == playerID {
 			playerName = player.Name
 			break
 		}
@@ -437,7 +501,7 @@ func (c *RoomController) PlaceBid() {
 
 	// Record bid
 	bid := Bid{
-		PlayerID:   reqBody.PlayerID,
+		PlayerID:   playerID,
 		PlayerName: playerName,
 		BidType:    reqBody.BidType,
 		TrumpSuit:  reqBody.TrumpSuit,
