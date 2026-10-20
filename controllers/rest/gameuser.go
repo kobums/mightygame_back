@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"regexp"
 	"mighty/controllers"
 	"mighty/models"
 )
@@ -57,7 +58,8 @@ func (c *GameuserController) Index(page int, pagesize int) {
         }
     }
 
-    if orderby != "" {
+    // orderby 는 ORDER BY 절에 그대로 들어가므로 "컬럼 [asc|desc]" 목록 형태만 허용한다 (SQL injection 방지).
+    if orderby != "" && regexp.MustCompile(`^\s*[A-Za-z0-9_]+(\s+(?i:asc|desc))?\s*(,\s*[A-Za-z0-9_]+(\s+(?i:asc|desc))?\s*)*$`).MatchString(orderby) {
         args = append(args, models.Ordering(orderby))
     }
     

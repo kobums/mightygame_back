@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/CloudyKit/jet/v3"
-	"github.com/gin-gonic/contrib/sessions"
+	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	uuid "github.com/satori/go.uuid"
 
